@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Environment and credentials
+.env
+*.pem
+credentials
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+
+# Database
+*.duckdb
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
