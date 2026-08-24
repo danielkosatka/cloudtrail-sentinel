@@ -234,9 +234,9 @@ cloudtrail-sentinel/
 ## Roadmap
 
 **Phase 1 - Ingestion and normalisation**
-- [ ] Read CloudTrail JSON from local disk
-- [ ] Handle gzip-compressed S3 objects
-- [ ] Normalise events to common schema
+- [x] Read CloudTrail JSON from local disk
+- [x] Handle gzip-compressed S3 objects
+- [x] Normalise events to common schema
 
 **Phase 2 - Detection engine**
 - [ ] YAML rule loader and schema
