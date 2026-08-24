@@ -9,7 +9,9 @@ Built to explore cloud detection engineering: how attacks against cloud
 identity and infrastructure become visible in logs, and how detection
 logic is written, tested, and validated.
 
-**Status:** In development. See [Roadmap](#roadmap) for current progress.
+**Status:** Phase 1 of 4 complete. Ingestion and normalisation are
+working; the detection engine is next. See [Roadmap](#roadmap) for
+current progress and [Quick Start](#quick-start) to run what exists.
 
 ---
 
@@ -19,6 +21,7 @@ logic is written, tested, and validated.
 - [Architecture](#architecture)
 - [Detections](#detections)
 - [Quick Start](#quick-start)
+- [Current Implementation](#current-implementation)
 - [AWS Sandbox Deployment](#aws-sandbox-deployment)
 - [Validation](#validation)
 - [Project Structure](#project-structure)
@@ -95,7 +98,11 @@ this iteration.
 
 ## Detections
 
-Each rule is a YAML file under `rules/`, mapped to a MITRE ATT&CK
+> **Not yet implemented.** The ruleset below is specified and will be
+> built in Phase 2. This section documents the intended coverage; no
+> rules are live. Progress is tracked in the [Roadmap](#roadmap).
+
+Each rule will be a YAML file under `rules/`, mapped to a MITRE ATT&CK
 technique and covered by unit tests.
 
 | Rule | ATT&CK | Severity | Trigger |
@@ -110,53 +117,58 @@ technique and covered by unit tests.
 | Activity in unapproved region | T1496 | Medium | RunInstances outside the configured region allowlist |
 
 Full rule documentation, including tuning notes and known false positive
-sources, is in [`docs/detections.md`](docs/detections.md).
+sources, will be maintained in [`docs/detections.md`](docs/detections.md).
 
 Most rules are stateless single-event matches. The brute force rule is
 stateful and requires windowed correlation across events; its
-implementation and the tradeoffs in window sizing are documented
+implementation and the tradeoffs in window sizing will be documented
 separately.
 
 ---
 
 ## Quick Start
 
-No AWS account required. Runs against bundled sample logs.
+Runs against bundled sample logs. No AWS account or credentials
+required. Needs Python 3.11 or later.
 
 ```
 git clone https://github.com/danielkosatka/cloudtrail-sentinel.git
 cd cloudtrail-sentinel
-docker compose up
-```
 
-Dashboard available at `http://localhost:8501`.
-
-To run without Docker:
-
-```
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate        # Windows: source .venv/Scripts/activate
+
 python -m src.pipeline --input sample_logs/
-streamlit run src/dashboard/app.py
 ```
 
-Run the test suite:
+This reads the sample CloudTrail events, normalises them to the common
+schema, and prints one line per event:
 
 ```
-pytest
+2026-08-14 09:02:44  success  Root         root         CreateUser
+2026-08-14 09:14:31  failure  IAMUser      contractor   ConsoleLogin
+2026-08-14 09:47:19  success  AssumedRole  DeployRole   AttachUserPolicy
+2026-08-14 09:52:08  success  IAMUser      backup-svc   StopLogging
 ```
+
+The two `failure` outcomes above originate from different fields in the
+raw JSON: console logins report the result in `responseElements`, while
+API calls signal failure through the presence of `errorCode`. Resolving
+that inconsistency is the purpose of the normalisation layer.
+
+Detection rules, persistence and the dashboard arrive in Phases 2 and 3.
+Docker packaging arrives with them.
 
 ---
 
 ## AWS Sandbox Deployment
 
-<!-- FILL: complete this section once Terraform is written and tested -->
+> **Planned for Phase 4.** The `terraform/` directory is currently empty.
 
-To run against live CloudTrail data, the `terraform/` directory
-provisions an isolated sandbox: a CloudTrail trail, a destination S3
-bucket with encryption and public access blocked, and a read-only IAM
-role for the ingestion process.
+To run against live CloudTrail data, Terraform will provision an isolated
+sandbox: a CloudTrail trail, a destination S3 bucket with encryption and
+public access blocked, and a read-only IAM role for the ingestion
+process.
 
 ```
 cd terraform
@@ -182,15 +194,17 @@ value.
 
 ## Validation
 
-Detection rules are only meaningful if they fire on real behaviour.
-Each rule is validated in two ways:
+> **Planned for Phase 4.** Nothing in this section is implemented yet.
 
-**Unit tests.** Every rule has at least one event that must match and one
-similar event that must not. These run on every push via GitHub Actions.
+Detection rules are only meaningful if they fire on real behaviour. Each
+rule will be validated in two ways:
 
-**Attack simulation.** Techniques are executed against the sandbox
-account and the resulting alerts captured end to end. Simulation scripts
-are in `simulate/`.
+**Unit tests.** Every rule gets at least one event that must match and
+one similar event that must not, run on every push via GitHub Actions.
+
+**Attack simulation.** Techniques will be executed against a Terraform
+sandbox account and the resulting alerts captured end to end, with
+scripts under `simulate/`.
 
 <!-- FILL: replace with real screenshots once Phase 4 is complete.
      Suggested images:
@@ -202,29 +216,64 @@ are in `simulate/`.
 
 ---
 
+## Current Implementation
+
+What exists today, after Phase 1.
+
+**Ingestion** (`src/ingest/reader.py`) reads CloudTrail records from
+local disk, transparently handling both plain and gzip-compressed files,
+and recursing through nested directories to match the layout CloudTrail
+uses in S3. Records are yielded lazily rather than loaded into memory.
+
+**Normalisation** (`src/normalise/`) converts each raw record into a
+`NormalisedEvent` with a fixed sixteen-field shape. The raw event is
+retained alongside the normalised view, since detection works on
+normalised data but investigation needs the original.
+
+Three fields are derived rather than copied, because CloudTrail stores
+them inconsistently:
+
+| Field | Why it needs resolving |
+| --- | --- |
+| `outcome` | Console logins report success in `responseElements`; API calls signal failure through the presence of `errorCode`. |
+| `mfa_used` | Console logins use `additionalEventData.MFAUsed` (`"Yes"`/`"No"`); assumed roles use `sessionContext.attributes.mfaAuthenticated` (`"true"`/`"false"`). |
+| `actor_name` | IAM users store it on `userIdentity`; assumed roles bury it under `sessionContext.sessionIssuer`; root has no name field at all. |
+
+Containing these differences in one layer means detection rules can read
+`event.outcome` or `event.actor_name` without knowing which identity type
+or event category produced them. Adding a second log source later means
+writing another normaliser, not changing every rule.
+
+**Sample data** (`sample_logs/`) contains eight synthetic events forming
+a coherent intrusion sequence: root creates a user, a contractor
+authenticates without MFA, a role grants that user `AdministratorAccess`,
+and the user then disables CloudTrail and launches compute in an unused
+region. This provides test coverage for most of the planned ruleset.
+
+---
+
 ## Project Structure
 
 ```
 cloudtrail-sentinel/
 |
 +-- src/
-|   +-- ingest/          Log collection from S3 or local disk
-|   +-- normalise/       CloudTrail to common schema
-|   +-- detect/          Rule loading and evaluation engine
-|   +-- dashboard/       Streamlit interface
+|   +-- ingest/          Log collection from S3 or local disk    [done]
+|   +-- normalise/       CloudTrail to common schema             [done]
+|   +-- detect/          Rule loading and evaluation engine      [phase 2]
+|   +-- dashboard/       Streamlit interface                     [phase 3]
 |
-+-- rules/               YAML detection rules
-+-- tests/               Unit tests, one positive and one negative per rule
-+-- sample_logs/         Sanitised CloudTrail events for offline use
-+-- simulate/            Attack simulation scripts
-+-- terraform/           Sandbox infrastructure
++-- rules/               YAML detection rules                    [phase 2]
++-- tests/               One positive and one negative per rule  [phase 2]
++-- sample_logs/         Sanitised CloudTrail events             [done]
++-- simulate/            Attack simulation scripts               [phase 4]
++-- terraform/           Sandbox infrastructure                  [phase 4]
 +-- docs/
 |   +-- architecture.md
 |   +-- detections.md
 |   +-- setup.md
 |   +-- images/
 |
-+-- docker-compose.yml
 +-- requirements.txt
 +-- README.md
 ```
@@ -233,12 +282,12 @@ cloudtrail-sentinel/
 
 ## Roadmap
 
-**Phase 1 - Ingestion and normalisation**
+**Phase 1 - Ingestion and normalisation** (complete)
 - [x] Read CloudTrail JSON from local disk
 - [x] Handle gzip-compressed S3 objects
 - [x] Normalise events to common schema
 
-**Phase 2 - Detection engine**
+**Phase 2 - Detection engine** (in progress)
 - [ ] YAML rule loader and schema
 - [ ] Stateless rule evaluation
 - [ ] First four detection rules
