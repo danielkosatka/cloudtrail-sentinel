@@ -150,6 +150,7 @@ schema, and prints one line per event:
 2026-08-14 09:47:19  success  AssumedRole  DeployRole   AttachUserPolicy
 2026-08-14 09:52:08  success  IAMUser      backup-svc   StopLogging
 ```
+![Raw CloudTrail JSON alongside the normalised output](docs/images/normalisation.png)
 
 The two `failure` outcomes above originate from different fields in the
 raw JSON: console logins report the result in `responseElements`, while
