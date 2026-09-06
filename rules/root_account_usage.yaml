@@ -1,0 +1,10 @@
+id: root_account_usage
+
+description: Any API call made using the AWS root account
+
+mitre_attack: T1078.004
+
+severity: high
+
+condition:
+  actor_type: Root

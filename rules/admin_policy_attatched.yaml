@@ -1,0 +1,13 @@
+id: admin_policy_attatched
+
+description: Any call that attaches an admin policy to a user
+
+mitre_attack: T1098
+
+severity: high
+
+condition:
+  event_name: AttachUserPolicy
+  raw[requestParameters][policyArn]: arn:aws:iam::aws:policy/AdministratorAccess
+
+

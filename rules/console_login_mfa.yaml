@@ -1,0 +1,11 @@
+id: console_login_mfa
+
+description: Console login where MFA was not used
+
+mitre_attack: T1078.004
+
+severity: medium
+
+condition:
+  event_name: ConsoleLogin
+  mfa_used: false

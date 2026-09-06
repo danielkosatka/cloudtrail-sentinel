@@ -1,0 +1,10 @@
+id: cloudtrail_disabled
+
+description: CloudTrail logging stopped or the trail deleted
+
+mitre_attack: T1562.008
+
+severity: critical
+
+condition:
+  event_name: [StopLogging, DeleteTrail]
