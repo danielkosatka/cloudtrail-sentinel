@@ -9,9 +9,12 @@ Built to explore cloud detection engineering: how attacks against cloud
 identity and infrastructure become visible in logs, and how detection
 logic is written, tested, and validated.
 
-**Status:** Phase 1 of 4 complete. Ingestion and normalisation are
-working; the detection engine is next. See [Roadmap](#roadmap) for
-current progress and [Quick Start](#quick-start) to run what exists.
+**Status:** Phase 1 complete. Phase 2 in progress: the first four
+detection rules are written as YAML and mapped to MITRE ATT&CK, and a
+rule loader reads and validates them, but there is no evaluation
+engine yet, so nothing in the pipeline currently matches them against
+events. See [Roadmap](#roadmap) for the exact
+breakdown and [Quick Start](#quick-start) to run what exists.
 
 ---
 
@@ -98,23 +101,33 @@ this iteration.
 
 ## Detections
 
-> **Not yet implemented.** The ruleset below is specified and will be
-> built in Phase 2. This section documents the intended coverage; no
-> rules are live. Progress is tracked in the [Roadmap](#roadmap).
+> **Partially implemented.** The first four rules below exist as YAML
+> under `rules/`, each mapped to a MITRE ATT&CK technique, and the rule
+> loader validates them. There is no evaluation engine yet, so nothing
+> currently runs these rules against events - they are data, not yet
+> behaviour. The
+> remaining four rules are still only specified. Progress is tracked
+> in the [Roadmap](#roadmap).
 
-Each rule will be a YAML file under `rules/`, mapped to a MITRE ATT&CK
-technique and covered by unit tests.
+Each rule is (or will be) a YAML file under `rules/`, mapped to a MITRE
+ATT&CK technique and covered by unit tests once the evaluation engine
+exists.
 
-| Rule | ATT&CK | Severity | Trigger |
-| --- | --- | --- | --- |
-| Root account usage | T1078.004 | High | Any API call where identity type is Root |
-| Console login without MFA | T1078.004 | Medium | ConsoleLogin with MFAUsed = No |
-| CloudTrail disabled or deleted | T1562.008 | Critical | StopLogging or DeleteTrail |
-| GuardDuty detector disabled | T1562.001 | Critical | DeleteDetector or UpdateDetector to disabled |
-| Admin policy attached to user | T1098 | High | AttachUserPolicy granting AdministratorAccess |
-| S3 bucket exposed publicly | T1530 | High | PutBucketPolicy or PutBucketAcl granting public access |
-| Console brute force | T1110 | Medium | 5 or more failed ConsoleLogin from one source IP within 10 minutes |
-| Activity in unapproved region | T1496 | Medium | RunInstances outside the configured region allowlist |
+| Rule | ATT&CK | Severity | Trigger | Status |
+| --- | --- | --- | --- | --- |
+| Root account usage | T1078.004 | High | Any API call where identity type is Root | Written |
+| Console login without MFA | T1078.004 | Medium | ConsoleLogin with MFAUsed = No | Written |
+| CloudTrail disabled or deleted | T1562.008 | Critical | StopLogging or DeleteTrail | Written |
+| GuardDuty detector disabled | T1562.001 | Critical | DeleteDetector or UpdateDetector to disabled | Planned |
+| Admin policy attached to user | T1098 | High | AttachUserPolicy granting AdministratorAccess | Written |
+| S3 bucket exposed publicly | T1530 | High | PutBucketPolicy or PutBucketAcl granting public access | Planned |
+| Console brute force | T1110 | Medium | 5 or more failed ConsoleLogin from one source IP within 10 minutes | Planned |
+| Activity in unapproved region | T1496 | Medium | RunInstances outside the configured region allowlist | Planned |
+
+"Written" means the YAML file exists under `rules/` with a finished
+condition - not that it is evaluated yet. See
+[Detection rules](#current-implementation) under Current Implementation
+for the schema those four files use.
 
 Full rule documentation, including tuning notes and known false positive
 sources, will be maintained in [`docs/detections.md`](docs/detections.md).
@@ -219,7 +232,7 @@ scripts under `simulate/`.
 
 ## Current Implementation
 
-What exists today, after Phase 1.
+What exists today: Phase 1, plus the first parts of Phase 2.
 
 **Ingestion** (`src/ingest/reader.py`) reads CloudTrail records from
 local disk, transparently handling both plain and gzip-compressed files,
@@ -251,6 +264,43 @@ authenticates without MFA, a role grants that user `AdministratorAccess`,
 and the user then disables CloudTrail and launches compute in an unused
 region. This provides test coverage for most of the planned ruleset.
 
+**Detection rules** (`rules/`, in progress) - four of the eight planned
+rules exist as YAML: root account usage, console login without MFA,
+CloudTrail disabled or deleted, and admin policy attached. Each rule is
+a mapping with five keys: `id` (a stable identifier, independent of the
+filename), `description` (analyst-facing text), `mitre_attack`,
+`severity`, and `condition` (the actual match logic).
+
+`condition` is a mapping of `NormalisedEvent` field names to required
+values. Every key at that level is ANDed together; a list value means
+"one of these" rather than a single required value. Three of the four
+rules read directly off the normalised schema. The fourth - admin
+policy attached - has to reach past it: which policy got attached only
+ever appears in `event.raw["requestParameters"]["policyArn"]`, since
+request parameters vary per API call in a way the fixed sixteen-field
+schema does not cover. That rule's condition key is written as a
+bracket path (`raw[requestParameters][policyArn]`), which the
+evaluation engine will need to resolve differently from a plain field
+lookup.
+
+**Rule loader** (`src/detect/loader.py`) reads a YAML rule file with
+`yaml.safe_load` - which refuses to construct arbitrary Python objects,
+avoiding a known deserialisation risk - and validates it before
+anything downstream can use it. A rule is rejected with a `RuleError`
+naming the file and the problem if it is empty, is not a mapping, is
+missing any of the five required keys, has a severity outside
+`low`/`medium`/`high`/`critical`, or has an empty `condition`.
+
+Failing loudly is deliberate: a rule that silently fails to load is a
+detection gap nobody knows exists. Below, one valid rule loads and two
+malformed files (one empty, one missing every required key) are
+rejected:
+
+![Rule loader accepting a valid rule and rejecting two malformed files](docs/images/rule_loader_validation.png)
+
+No evaluation engine exists yet, so loaded rules are not yet matched
+against events.
+
 ---
 
 ## Project Structure
@@ -264,7 +314,7 @@ cloudtrail-sentinel/
 |   +-- detect/          Rule loading and evaluation engine      [phase 2]
 |   +-- dashboard/       Streamlit interface                     [phase 3]
 |
-+-- rules/               YAML detection rules                    [phase 2]
++-- rules/               YAML detection rules          [phase 2, 4 of 8 written]
 +-- tests/               One positive and one negative per rule  [phase 2]
 +-- sample_logs/         Sanitised CloudTrail events             [done]
 +-- simulate/            Attack simulation scripts               [phase 4]
@@ -289,9 +339,13 @@ cloudtrail-sentinel/
 - [x] Normalise events to common schema
 
 **Phase 2 - Detection engine** (in progress)
-- [ ] YAML rule loader and schema
+- [x] Rule schema (id, description, mitre_attack, severity, condition)
+- [x] First four detection rules written as YAML (root account usage,
+      console login without MFA, CloudTrail disabled/deleted, admin
+      policy attached)
+- [x] YAML rule loader with validation (single file)
+- [ ] Load full `rules/` directory
 - [ ] Stateless rule evaluation
-- [ ] First four detection rules
 - [ ] Unit tests and CI pipeline
 
 **Phase 3 - Storage and interface**
