@@ -2,8 +2,8 @@
 
 A detection pipeline for AWS CloudTrail logs. Ingests control-plane audit
 events, normalises them into a common schema, evaluates them against
-version-controlled detection rules mapped to MITRE ATT&CK, and surfaces
-alerts through a local dashboard.
+version-controlled detection rules mapped to MITRE ATT&CK, and will
+surface alerts through a local dashboard.
 
 Built to explore cloud detection engineering: how attacks against cloud
 identity and infrastructure become visible in logs, and how detection
@@ -130,7 +130,7 @@ condition - not that it is evaluated yet. See
 for the schema those four files use.
 
 Full rule documentation, including tuning notes and known false positive
-sources, will be maintained in [`docs/detections.md`](docs/detections.md).
+sources, will be maintained in `docs/detections.md` (not yet written).
 
 Most rules are stateless single-event matches. The brute force rule is
 stateful and requires windowed correlation across events; its
@@ -150,18 +150,26 @@ cd cloudtrail-sentinel
 
 python -m venv .venv
 source .venv/bin/activate        # Windows: source .venv/Scripts/activate
+pip install -r requirements.txt
 
 python -m src.pipeline --input sample_logs/
 ```
 
 This reads the sample CloudTrail events, normalises them to the common
-schema, and prints one line per event:
+schema, and prints one line per event (timestamp, outcome, identity
+type, actor, API call, region, source IP):
 
 ```
-2026-08-14 09:02:44  success  Root         root         CreateUser
-2026-08-14 09:14:31  failure  IAMUser      contractor   ConsoleLogin
-2026-08-14 09:47:19  success  AssumedRole  DeployRole   AttachUserPolicy
-2026-08-14 09:52:08  success  IAMUser      backup-svc   StopLogging
+2026-08-14 08:31:12  success  IAMUser      analyst      DescribeInstances    eu-west-2       203.0.113.14
+2026-08-14 09:02:44  success  Root         root         CreateUser           us-east-1       198.51.100.77
+2026-08-14 09:15:03  success  IAMUser      contractor   ConsoleLogin         us-east-1       198.51.100.77
+2026-08-14 09:14:31  failure  IAMUser      contractor   ConsoleLogin         us-east-1       198.51.100.77
+2026-08-14 09:47:19  success  AssumedRole  DeployRole   AttachUserPolicy     us-east-1       192.0.2.201
+2026-08-14 09:52:08  success  IAMUser      backup-svc   StopLogging          eu-west-2       192.0.2.201
+2026-08-14 10:05:55  success  IAMUser      backup-svc   RunInstances         ap-southeast-2  192.0.2.201
+2026-08-14 10:22:41  failure  IAMUser      analyst      DeleteUser           us-east-1       203.0.113.14
+
+8 events normalised
 ```
 ![Raw CloudTrail JSON alongside the normalised output](docs/images/normalisation.png)
 
@@ -259,10 +267,19 @@ or event category produced them. Adding a second log source later means
 writing another normaliser, not changing every rule.
 
 **Sample data** (`sample_logs/`) contains eight synthetic events forming
-a coherent intrusion sequence: root creates a user, a contractor
-authenticates without MFA, a role grants that user `AdministratorAccess`,
-and the user then disables CloudTrail and launches compute in an unused
-region. This provides test coverage for most of the planned ruleset.
+a coherent intrusion sequence: root creates a new user, `backup-svc`; a
+contractor fails a console login and then succeeds, both without MFA; a
+role grants `backup-svc` `AdministratorAccess`; and `backup-svc` then
+stops the CloudTrail trail and launches eight `c5.4xlarge` instances in
+an unused region (`ap-southeast-2`). Two benign events (a read-only
+`DescribeInstances` and a denied `DeleteUser`) are included as noise.
+Between them, the events give most planned rules at least one event
+that should trigger them.
+
+The two contractor logins appear out of order in the file (09:15
+before 09:14). Real CloudTrail delivery does not guarantee ordering
+either. The stateful brute force rule will need to sort by timestamp
+rather than trust file order.
 
 **Detection rules** (`rules/`, in progress) - four of the eight planned
 rules exist as YAML: root account usage, console login without MFA,
@@ -320,12 +337,11 @@ cloudtrail-sentinel/
 +-- simulate/            Attack simulation scripts               [phase 4]
 +-- terraform/           Sandbox infrastructure                  [phase 4]
 +-- docs/
-|   +-- architecture.md
-|   +-- detections.md
-|   +-- setup.md
-|   +-- images/
+|   +-- images/          Screenshots used in this README
+|   +-- detections.md    Rule tuning notes                       [planned]
 |
-+-- requirements.txt
++-- requirements.txt     Python dependencies (PyYAML)
++-- LICENSE
 +-- README.md
 ```
 
@@ -510,4 +526,4 @@ Daniel Kosatka - Cybersecurity student, University of Lancashire
 
 ## Licence
 
-MIT
+MIT. See [LICENSE](LICENSE).
