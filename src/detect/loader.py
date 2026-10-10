@@ -5,6 +5,9 @@
 from pathlib import Path   # Path = modern, cross-platform way to handle file paths
 
 import yaml                # PyYAML: turns YAML text into Python objects (dicts, lists, strings)
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Constants: values that never change while the program runs.
 # UPPER_CASE names are the Python convention for "don't modify this".
@@ -91,7 +94,7 @@ def load_rules(directory, strict=False):
         except RuleError as err:
             if strict:
                 raise
-            print(f"WARNING: skipping rule: {err}")
+            logger.warning("skipping rule: %s", err)
             skipped += 1
 
     print(f"Loaded {len(rules)} rules, skipped {skipped}")
