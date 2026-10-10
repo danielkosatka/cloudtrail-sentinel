@@ -9,12 +9,13 @@ Built to explore cloud detection engineering: how attacks against cloud
 identity and infrastructure become visible in logs, and how detection
 logic is written, tested, and validated.
 
-**Status:** Phase 1 complete. Phase 2 in progress: the first four
-detection rules are written as YAML and mapped to MITRE ATT&CK, and a
-rule loader reads and validates them, but there is no evaluation
-engine yet, so nothing in the pipeline currently matches them against
-events. See [Roadmap](#roadmap) for the exact
-breakdown and [Quick Start](#quick-start) to run what exists.
+**Status:** Phase 1 complete. Phase 2 in progress: four of the eight
+detection rules are implemented as YAML mapped to MITRE ATT&CK, a rule
+loader validates them, and a stateless evaluation engine matches them
+against normalised events and raises alerts, which the pipeline prints.
+Unit tests, the four remaining rules, persistence and the dashboard are
+not built yet. See [Roadmap](#roadmap) for the exact breakdown and
+[Quick Start](#quick-start) to run what exists.
 
 ---
 
@@ -102,30 +103,30 @@ this iteration.
 ## Detections
 
 > **Partially implemented.** The first four rules below exist as YAML
-> under `rules/`, each mapped to a MITRE ATT&CK technique, and the rule
-> loader validates them. There is no evaluation engine yet, so nothing
-> currently runs these rules against events - they are data, not yet
-> behaviour. The
-> remaining four rules are still only specified. Progress is tracked
-> in the [Roadmap](#roadmap).
+> under `rules/`, each mapped to a MITRE ATT&CK technique. The rule
+> loader validates them and the evaluation engine runs them against
+> events. The remaining four rules are still only specified; their
+> placeholder files in `rules/` are skipped with a warning at load time.
+> Progress is tracked in the [Roadmap](#roadmap).
 
 Each rule is (or will be) a YAML file under `rules/`, mapped to a MITRE
-ATT&CK technique and covered by unit tests once the evaluation engine
-exists.
+ATT&CK technique and covered by unit tests (not yet written).
 
 | Rule | ATT&CK | Severity | Trigger | Status |
 | --- | --- | --- | --- | --- |
-| Root account usage | T1078.004 | High | Any API call where identity type is Root | Written |
-| Console login without MFA | T1078.004 | Medium | ConsoleLogin with MFAUsed = No | Written |
-| CloudTrail disabled or deleted | T1562.008 | Critical | StopLogging or DeleteTrail | Written |
+| Root account usage | T1078.004 | High | Any API call where identity type is Root | Implemented |
+| Console login without MFA | T1078.004 | Medium | Successful ConsoleLogin with MFAUsed = No | Implemented |
+| CloudTrail disabled or deleted | T1562.008 | Critical | StopLogging or DeleteTrail | Implemented |
 | GuardDuty detector disabled | T1562.001 | Critical | DeleteDetector or UpdateDetector to disabled | Planned |
-| Admin policy attached to user | T1098 | High | AttachUserPolicy granting AdministratorAccess | Written |
+| Admin policy attached to user | T1098 | High | AttachUserPolicy granting AdministratorAccess | Implemented |
 | S3 bucket exposed publicly | T1530 | High | PutBucketPolicy or PutBucketAcl granting public access | Planned |
 | Console brute force | T1110 | Medium | 5 or more failed ConsoleLogin from one source IP within 10 minutes | Planned |
 | Activity in unapproved region | T1496 | Medium | RunInstances outside the configured region allowlist | Planned |
 
-"Written" means the YAML file exists under `rules/` with a finished
-condition - not that it is evaluated yet. See
+"Implemented" means the YAML file exists under `rules/` with a finished
+condition and the engine evaluates it. A failed login does not trigger
+the MFA rule: MFA is never reached when the password step fails, so
+alerting on it would be noise. See
 [Detection rules](#current-implementation) under Current Implementation
 for the schema those four files use.
 
@@ -156,30 +157,28 @@ python -m src.pipeline --input sample_logs/
 ```
 
 This reads the sample CloudTrail events, normalises them to the common
-schema, and prints one line per event (timestamp, outcome, identity
-type, actor, API call, region, source IP):
+schema, loads the detection rules, evaluates every event against every
+rule, and prints one line per alert (severity, rule, ATT&CK technique,
+API call, actor), then a summary:
 
 ```
-2026-08-14 08:31:12  success  IAMUser      analyst      DescribeInstances    eu-west-2       203.0.113.14
-2026-08-14 09:02:44  success  Root         root         CreateUser           us-east-1       198.51.100.77
-2026-08-14 09:15:03  success  IAMUser      contractor   ConsoleLogin         us-east-1       198.51.100.77
-2026-08-14 09:14:31  failure  IAMUser      contractor   ConsoleLogin         us-east-1       198.51.100.77
-2026-08-14 09:47:19  success  AssumedRole  DeployRole   AttachUserPolicy     us-east-1       192.0.2.201
-2026-08-14 09:52:08  success  IAMUser      backup-svc   StopLogging          eu-west-2       192.0.2.201
-2026-08-14 10:05:55  success  IAMUser      backup-svc   RunInstances         ap-southeast-2  192.0.2.201
-2026-08-14 10:22:41  failure  IAMUser      analyst      DeleteUser           us-east-1       203.0.113.14
+[HIGH    ] root_account_usage     T1078.004  CreateUser         root
+[MEDIUM  ] console_login_mfa      T1078.004  ConsoleLogin       contractor
+[HIGH    ] admin_policy_attached  T1098      AttachUserPolicy   DeployRole
+[CRITICAL] cloudtrail_disabled    T1562.008  StopLogging        backup-svc
 
-8 events normalised
+8 events, 4 alerts
 ```
-![Raw CloudTrail JSON alongside the normalised output](docs/images/normalisation.png)
 
-The two `failure` outcomes above originate from different fields in the
-raw JSON: console logins report the result in `responseElements`, while
-API calls signal failure through the presence of `errorCode`. Resolving
-that inconsistency is the purpose of the normalisation layer.
+Before the alerts, the loader prints a warning for each of the four
+placeholder rule files it skips, followed by `Loaded 4 rules, skipped 4`.
+Skipping broken rules loudly rather than silently is deliberate: a rule
+that fails to load is a detection gap.
 
-Detection rules, persistence and the dashboard arrive in Phases 2 and 3.
-Docker packaging arrives with them.
+![Pipeline output showing four alerts raised from eight sample events](docs/images/alerts_output.png)
+
+Persistence and the dashboard arrive in Phase 3. Docker packaging
+arrives with them.
 
 ---
 
@@ -240,7 +239,8 @@ scripts under `simulate/`.
 
 ## Current Implementation
 
-What exists today: Phase 1, plus the first parts of Phase 2.
+What exists today: Phase 1, plus the core of Phase 2 (rule loading,
+evaluation and alerting).
 
 **Ingestion** (`src/ingest/reader.py`) reads CloudTrail records from
 local disk, transparently handling both plain and gzip-compressed files,
@@ -260,6 +260,8 @@ them inconsistently:
 | `outcome` | Console logins report success in `responseElements`; API calls signal failure through the presence of `errorCode`. |
 | `mfa_used` | Console logins use `additionalEventData.MFAUsed` (`"Yes"`/`"No"`); assumed roles use `sessionContext.attributes.mfaAuthenticated` (`"true"`/`"false"`). |
 | `actor_name` | IAM users store it on `userIdentity`; assumed roles bury it under `sessionContext.sessionIssuer`; root has no name field at all. |
+
+![Raw CloudTrail JSON alongside the normalised output](docs/images/normalisation.png)
 
 Containing these differences in one layer means detection rules can read
 `event.outcome` or `event.actor_name` without knowing which identity type
@@ -282,7 +284,7 @@ either. The stateful brute force rule will need to sort by timestamp
 rather than trust file order.
 
 **Detection rules** (`rules/`, in progress) - four of the eight planned
-rules exist as YAML: root account usage, console login without MFA,
+rules are implemented as YAML: root account usage, console login without MFA,
 CloudTrail disabled or deleted, and admin policy attached. Each rule is
 a mapping with five keys: `id` (a stable identifier, independent of the
 filename), `description` (analyst-facing text), `mitre_attack`,
@@ -297,8 +299,7 @@ ever appears in `event.raw["requestParameters"]["policyArn"]`, since
 request parameters vary per API call in a way the fixed sixteen-field
 schema does not cover. That rule's condition key is written as a
 bracket path (`raw[requestParameters][policyArn]`), which the
-evaluation engine will need to resolve differently from a plain field
-lookup.
+evaluation engine resolves differently from a plain field lookup.
 
 **Rule loader** (`src/detect/loader.py`) reads a YAML rule file with
 `yaml.safe_load` - which refuses to construct arbitrary Python objects,
@@ -315,8 +316,24 @@ rejected:
 
 ![Rule loader accepting a valid rule and rejecting two malformed files](docs/images/rule_loader_validation.png)
 
-No evaluation engine exists yet, so loaded rules are not yet matched
-against events.
+`load_rules()` loads every `.yaml` file in a directory. By default it
+logs a warning for each broken file and skips it, then prints a
+`Loaded X rules, skipped Y` summary; with `strict=True` it stops at the
+first broken file, which is intended for tests and CI.
+
+**Evaluation engine** (`src/detect/engine.py`) matches normalised events
+against loaded rules. `get_field` reads a field from an event, including
+bracket paths into the raw record such as
+`raw[requestParameters][policyArn]`, and returns `None` instead of
+failing when part of the path is missing. `matches` returns true only if
+every line of a rule's `condition` holds: a single value must be equal,
+and a list means "one of these". Comparison is deliberately strict, so an
+event whose `mfa_used` is unknown (`None`) does not match a rule that
+looks for `mfa_used: false`. `evaluate` runs every event against every
+rule and returns a list of `Alert` objects, each carrying the rule id,
+severity, ATT&CK technique, description and the full original event.
+The pipeline normalises events first and only then evaluates, so rules
+depend on the normalised schema rather than on any log format.
 
 ---
 
@@ -328,7 +345,7 @@ cloudtrail-sentinel/
 +-- src/
 |   +-- ingest/          Log collection from S3 or local disk    [done]
 |   +-- normalise/       CloudTrail to common schema             [done]
-|   +-- detect/          Rule loading and evaluation engine      [phase 2]
+|   +-- detect/          Rule loading and evaluation engine      [loader, engine done]
 |   +-- dashboard/       Streamlit interface                     [phase 3]
 |
 +-- rules/               YAML detection rules          [phase 2, 4 of 8 written]
@@ -360,8 +377,8 @@ cloudtrail-sentinel/
       console login without MFA, CloudTrail disabled/deleted, admin
       policy attached)
 - [x] YAML rule loader with validation (single file)
-- [ ] Load full `rules/` directory
-- [ ] Stateless rule evaluation
+- [x] Load full `rules/` directory (skip-and-warn, strict mode)
+- [x] Stateless rule evaluation and alerts, wired into the pipeline
 - [ ] Unit tests and CI pipeline
 
 **Phase 3 - Storage and interface**
