@@ -12,3 +12,17 @@ def get_field(event, name):
             value = value[key]
         return value
     return getattr(event, name, None)
+
+def matches(event, rule):
+    """Return True if the event satisfies every field in the rule's condition."""
+    for field, expected in rule["condition"].items():
+        actual = get_field(event, field)
+
+        if isinstance(expected, list):
+            if actual not in expected:
+                return False
+        else:
+            if actual != expected:
+                return False
+
+    return True

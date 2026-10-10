@@ -8,4 +8,5 @@ severity: medium
 
 condition:
   event_name: ConsoleLogin
+  outcome: success
   mfa_used: false
