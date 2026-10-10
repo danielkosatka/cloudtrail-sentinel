@@ -34,10 +34,14 @@ def load_rule(path):
     # error happens partway through. "as f" gives us a handle to read from.
     # encoding="utf-8" avoids Windows reading the file with the wrong text encoding.
     with path.open(encoding="utf-8") as f:
+        try:
+            rule = yaml.safe_load(f)
+        except yaml.YAMLError as err:
+            raise RuleError(f"{path.name}: invalid YAML syntax ({err})") from err
         # safe_load parses YAML into Python objects. "safe" = it will only build
         # basic types (dicts, lists, strings, numbers). The unsafe version can
         # execute code embedded in a file: a real deserialisation vulnerability.
-        rule = yaml.safe_load(f)
+        
 
     # --- Validation: check the rule is usable, failing loudly if not ---
     # Each check "raises" (throws) a RuleError that names the file and the
@@ -54,7 +58,6 @@ def load_rule(path):
     # isinstance(x, dict) asks "is x a dictionary?"
     if not isinstance(rule, dict):
         raise RuleError(f"{path.name}: expected key/value pairs, got {type(rule).__name__}")
-
     # Check 3: all five required keys must be present.
     # Set difference: (everything required) minus (everything present)
     # leaves exactly what's missing. Empty set = nothing missing.
@@ -76,3 +79,20 @@ def load_rule(path):
 
     # All checks passed: hand the rule back to whoever called this function.
     return rule
+
+def load_rules(directory, strict=False):
+    """Load every .yaml rule in a directory. Skip broken ones unless strict."""
+    rules = []
+    skipped = 0
+
+    for path in sorted(Path(directory).glob("*.yaml")):
+        try:
+            rules.append(load_rule(path))
+        except RuleError as err:
+            if strict:
+                raise
+            print(f"WARNING: skipping rule: {err}")
+            skipped += 1
+
+    print(f"Loaded {len(rules)} rules, skipped {skipped}")
+    return rules
