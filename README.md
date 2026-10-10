@@ -9,11 +9,11 @@ Built to explore cloud detection engineering: how attacks against cloud
 identity and infrastructure become visible in logs, and how detection
 logic is written, tested, and validated.
 
-**Status:** Phase 1 complete. Phase 2 in progress: four of the eight
+**Status:** Phase 1 complete. Phase 2 in progress: six of the eight
 detection rules are implemented as YAML mapped to MITRE ATT&CK, a rule
 loader validates them, and a stateless evaluation engine matches them
 against normalised events and raises alerts, which the pipeline prints.
-Unit tests, the four remaining rules, persistence and the dashboard are
+Unit tests, the two remaining rules, persistence and the dashboard are
 not built yet. See [Roadmap](#roadmap) for the exact breakdown and
 [Quick Start](#quick-start) to run what exists.
 
@@ -102,10 +102,10 @@ this iteration.
 
 ## Detections
 
-> **Partially implemented.** The first four rules below exist as YAML
+> **Partially implemented.** Six of the rules below exist as YAML
 > under `rules/`, each mapped to a MITRE ATT&CK technique. The rule
 > loader validates them and the evaluation engine runs them against
-> events. The remaining four rules are still only specified; their
+> events. The remaining two rules are still only specified; their
 > placeholder files in `rules/` are skipped with a warning at load time.
 > Progress is tracked in the [Roadmap](#roadmap).
 
@@ -117,18 +117,18 @@ ATT&CK technique and covered by unit tests (not yet written).
 | Root account usage | T1078.004 | High | Any API call where identity type is Root | Implemented |
 | Console login without MFA | T1078.004 | Medium | Successful ConsoleLogin with MFAUsed = No | Implemented |
 | CloudTrail disabled or deleted | T1562.008 | Critical | StopLogging or DeleteTrail | Implemented |
-| GuardDuty detector disabled | T1562.001 | Critical | DeleteDetector or UpdateDetector to disabled | Planned |
+| GuardDuty detector disabled | T1562.001 | Critical | DeleteDetector (the UpdateDetector-to-disabled variant is not yet covered) | Implemented |
 | Admin policy attached to user | T1098 | High | AttachUserPolicy granting AdministratorAccess | Implemented |
 | S3 bucket exposed publicly | T1530 | High | PutBucketPolicy or PutBucketAcl granting public access | Planned |
 | Console brute force | T1110 | Medium | 5 or more failed ConsoleLogin from one source IP within 10 minutes | Planned |
-| Activity in unapproved region | T1496 | Medium | RunInstances outside the configured region allowlist | Planned |
+| Activity in unapproved region | T1496 | Medium | RunInstances outside the configured region allowlist | Implemented |
 
 "Implemented" means the YAML file exists under `rules/` with a finished
 condition and the engine evaluates it. A failed login does not trigger
 the MFA rule: MFA is never reached when the password step fails, so
 alerting on it would be noise. See
 [Detection rules](#current-implementation) under Current Implementation
-for the schema those four files use.
+for the schema those files use.
 
 Full rule documentation, including tuning notes and known false positive
 sources, will be maintained in `docs/detections.md` (not yet written).
@@ -166,16 +166,17 @@ API call, actor), then a summary:
 [MEDIUM  ] console_login_mfa      T1078.004  ConsoleLogin       contractor
 [HIGH    ] admin_policy_attached  T1098      AttachUserPolicy   DeployRole
 [CRITICAL] cloudtrail_disabled    T1562.008  StopLogging        backup-svc
+[MEDIUM  ] unapproved_region      T1496      RunInstances       backup-svc
 
-8 events, 4 alerts
+8 events, 5 alerts
 ```
 
-Before the alerts, the loader prints a warning for each of the four
-placeholder rule files it skips, followed by `Loaded 4 rules, skipped 4`.
+Before the alerts, the loader prints a warning for each of the two
+placeholder rule files it skips, followed by `Loaded 6 rules, skipped 2`.
 Skipping broken rules loudly rather than silently is deliberate: a rule
 that fails to load is a detection gap.
 
-![Pipeline output showing four alerts raised from eight sample events](docs/images/alerts_output.png)
+![Pipeline output showing five alerts raised from eight sample events](docs/images/alerts_output.png)
 
 Persistence and the dashboard arrive in Phase 3. Docker packaging
 arrives with them.
@@ -283,18 +284,20 @@ before 09:14). Real CloudTrail delivery does not guarantee ordering
 either. The stateful brute force rule will need to sort by timestamp
 rather than trust file order.
 
-**Detection rules** (`rules/`, in progress) - four of the eight planned
+**Detection rules** (`rules/`, in progress) - six of the eight planned
 rules are implemented as YAML: root account usage, console login without MFA,
-CloudTrail disabled or deleted, and admin policy attached. Each rule is
+CloudTrail disabled or deleted, admin policy attached, GuardDuty detector
+deleted, and activity in an unapproved region. Each rule is
 a mapping with five keys: `id` (a stable identifier, independent of the
 filename), `description` (analyst-facing text), `mitre_attack`,
 `severity`, and `condition` (the actual match logic).
 
 `condition` is a mapping of `NormalisedEvent` field names to required
 values. Every key at that level is ANDed together; a list value means
-"one of these" rather than a single required value. Three of the four
-rules read directly off the normalised schema. The fourth - admin
-policy attached - has to reach past it: which policy got attached only
+"one of these" rather than a single required value; `not_in: [...]`
+means "anything except these", which the region rule uses as an
+allowlist. Most rules read directly off the normalised schema. One -
+admin policy attached - has to reach past it: which policy got attached only
 ever appears in `event.raw["requestParameters"]["policyArn"]`, since
 request parameters vary per API call in a way the fixed sixteen-field
 schema does not cover. That rule's condition key is written as a
@@ -327,7 +330,9 @@ bracket paths into the raw record such as
 `raw[requestParameters][policyArn]`, and returns `None` instead of
 failing when part of the path is missing. `matches` returns true only if
 every line of a rule's `condition` holds: a single value must be equal,
-and a list means "one of these". Comparison is deliberately strict, so an
+a list means "one of these", and `not_in` means "none of these" (used for
+the region allowlist). An unknown operator raises an error rather than
+silently never matching. Comparison is deliberately strict, so an
 event whose `mfa_used` is unknown (`None`) does not match a rule that
 looks for `mfa_used: false`. `evaluate` runs every event against every
 rule and returns a list of `Alert` objects, each carrying the rule id,
@@ -348,7 +353,7 @@ cloudtrail-sentinel/
 |   +-- detect/          Rule loading and evaluation engine      [loader, engine done]
 |   +-- dashboard/       Streamlit interface                     [phase 3]
 |
-+-- rules/               YAML detection rules          [phase 2, 4 of 8 written]
++-- rules/               YAML detection rules          [phase 2, 6 of 8 written]
 +-- tests/               One positive and one negative per rule  [phase 2]
 +-- sample_logs/         Sanitised CloudTrail events             [done]
 +-- simulate/            Attack simulation scripts               [phase 4]
@@ -379,11 +384,12 @@ cloudtrail-sentinel/
 - [x] YAML rule loader with validation (single file)
 - [x] Load full `rules/` directory (skip-and-warn, strict mode)
 - [x] Stateless rule evaluation and alerts, wired into the pipeline
+- [x] `not_in` operator, plus GuardDuty and unapproved-region rules
 - [ ] Unit tests and CI pipeline
 
 **Phase 3 - Storage and interface**
 - [ ] DuckDB persistence for events and alerts
-- [ ] Remaining four rules, including stateful brute force detection
+- [ ] Remaining two rules: S3 bucket exposed and stateful brute force detection
 - [ ] Streamlit dashboard with alert detail and ATT&CK coverage view
 
 **Phase 4 - Live validation**
