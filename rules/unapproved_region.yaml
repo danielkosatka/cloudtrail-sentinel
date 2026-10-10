@@ -1,0 +1,12 @@
+id: unapproved_region
+
+description: Instances launched outside the approved regions
+
+mitre_attack: T1496
+
+severity: medium
+
+condition:
+  event_name: RunInstances
+  region:
+    not_in: [eu-west-2, us-east-1]

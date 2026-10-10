@@ -46,13 +46,18 @@ def matches(event, rule):
     for field, expected in rule["condition"].items():
         actual = get_field(event, field)
 
-        if isinstance(expected, list):
+        if isinstance(expected, dict):
+            if "not_in" in expected:
+                if actual in expected["not_in"]:
+                    return False
+            else:
+                raise ValueError(f"unknown operator in rule {rule['id']}: {list(expected)}")
+        elif isinstance(expected, list):
             if actual not in expected:
                 return False
         else:
             if actual != expected:
                 return False
-
     return True
 
 @dataclass
