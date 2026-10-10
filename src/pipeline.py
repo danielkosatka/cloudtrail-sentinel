@@ -1,10 +1,12 @@
-"""Phase 1: read, normalise, print."""
+"""Read, normalise, detect, print alerts."""
 
 import argparse
 from pathlib import Path
 
 from src.ingest.reader import read_directory
 from src.normalise.cloudtrail import normalise
+from src.detect.loader import load_rules
+from src.detect.engine import evaluate
 
 
 def main() -> None:
@@ -12,18 +14,18 @@ def main() -> None:
     parser.add_argument("--input", required=True, type=Path)
     args = parser.parse_args()
 
-    count = 0
-    for record in read_directory(args.input):
-        event = normalise(record)
-        print(
-            f"{event.timestamp:%Y-%m-%d %H:%M:%S}  "
-            f"{event.outcome:<8} {event.actor_type:<12} "
-            f"{str(event.actor_name):<12} {event.event_name:<20} "
-            f"{event.region:<15} {event.source_ip}"
-        )
-        count += 1
+    events = [normalise(record) for record in read_directory(args.input)]
+    rules = load_rules("rules")
+    alerts = evaluate(events, rules)
 
-    print(f"\n{count} events normalised")
+    for alert in alerts:
+        print(
+            f"[{alert.severity.upper():<8}] {alert.rule_id:<22} "
+            f"{alert.mitre_attack:<10} {alert.event.event_name:<18} "
+            f"{alert.event.actor_name}"
+        )
+
+    print(f"\n{len(events)} events, {len(alerts)} alerts")
 
 
 if __name__ == "__main__":
