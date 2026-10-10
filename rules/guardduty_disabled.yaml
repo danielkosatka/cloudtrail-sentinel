@@ -1,0 +1,10 @@
+id: guardduty_disabled
+
+description: GuardDuty detector deleted
+
+mitre_attack: T1562.001
+
+severity: critical
+
+condition:
+  event_name: DeleteDetector
