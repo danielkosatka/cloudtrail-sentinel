@@ -1,0 +1,38 @@
+name: tests
+
+# Run the test suite on every push to main and on every pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The job only reads the repository; it never needs to write to it.
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported version (see README) and the one used for development.
+        python-version: ["3.11", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -v
+
+      # Smoke test: the pipeline itself must still run end to end.
+      - name: Run pipeline on sample logs
+        run: python -m src.pipeline --input sample_logs/

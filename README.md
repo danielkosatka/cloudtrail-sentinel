@@ -9,12 +9,13 @@ Built to explore cloud detection engineering: how attacks against cloud
 identity and infrastructure become visible in logs, and how detection
 logic is written, tested, and validated.
 
-**Status:** Phase 1 complete. Phase 2 in progress: six of the eight
-detection rules are implemented as YAML mapped to MITRE ATT&CK, a rule
-loader validates them, and a stateless evaluation engine matches them
-against normalised events and raises alerts, which the pipeline prints.
-Unit tests, the two remaining rules, persistence and the dashboard are
-not built yet. See [Roadmap](#roadmap) for the exact breakdown and
+**Status:** Phases 1 and 2 complete. Six of the eight detection rules
+are implemented as YAML mapped to MITRE ATT&CK, a rule loader validates
+them, and a stateless evaluation engine matches them against normalised
+events and raises alerts, which the pipeline prints. A pytest suite
+covers every layer and runs on each push through GitHub Actions. The
+two remaining rules, persistence and the dashboard are not built yet.
+See [Roadmap](#roadmap) for the exact breakdown and
 [Quick Start](#quick-start) to run what exists.
 
 ---
@@ -110,7 +111,8 @@ this iteration.
 > Progress is tracked in the [Roadmap](#roadmap).
 
 Each rule is (or will be) a YAML file under `rules/`, mapped to a MITRE
-ATT&CK technique and covered by unit tests (not yet written).
+ATT&CK technique. Every implemented rule is covered by unit tests in
+`tests/test_rules.py`.
 
 | Rule | ATT&CK | Severity | Trigger | Status |
 | --- | --- | --- | --- | --- |
@@ -181,6 +183,18 @@ that fails to load is a detection gap.
 Persistence and the dashboard arrive in Phase 3. Docker packaging
 arrives with them.
 
+**Running the tests**
+
+```
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+`requirements-dev.txt` installs the project's dependencies plus pytest.
+The suite needs no AWS account or network access. The same command runs
+in GitHub Actions on every push and pull request
+(`.github/workflows/tests.yml`).
+
 ---
 
 ## AWS Sandbox Deployment
@@ -216,13 +230,18 @@ value.
 
 ## Validation
 
-> **Planned for Phase 4.** Nothing in this section is implemented yet.
+> **Partly implemented.** The unit tests exist. Attack simulation is
+> planned for Phase 4.
 
 Detection rules are only meaningful if they fire on real behaviour. Each
-rule will be validated in two ways:
+rule is validated in two ways:
 
-**Unit tests.** Every rule gets at least one event that must match and
-one similar event that must not, run on every push via GitHub Actions.
+**Unit tests** (implemented). Every implemented rule has at least one
+event that must match and one similar event that must not, run on every
+push via GitHub Actions. The negative cases pin down the decisions that
+keep a rule quiet: a failed login or an unknown MFA state does not
+trigger the MFA rule, and a read-only call in an unapproved region does
+not trigger the region rule.
 
 **Attack simulation.** Techniques will be executed against a Terraform
 sandbox account and the resulting alerts captured end to end, with
@@ -240,8 +259,8 @@ scripts under `simulate/`.
 
 ## Current Implementation
 
-What exists today: Phase 1, plus the core of Phase 2 (rule loading,
-evaluation and alerting).
+What exists today: Phase 1 and Phase 2 (rule loading, evaluation,
+alerting, tests and CI).
 
 **Ingestion** (`src/ingest/reader.py`) reads CloudTrail records from
 local disk, transparently handling both plain and gzip-compressed files,
@@ -340,6 +359,18 @@ severity, ATT&CK technique, description and the full original event.
 The pipeline normalises events first and only then evaluates, so rules
 depend on the normalised schema rather than on any log format.
 
+**Tests** (`tests/`) - a pytest suite split by layer, so a failure
+points at the part that broke: `test_engine.py` (field lookup, matching
+operators, alert creation), `test_loader.py` (every validation failure,
+skip-and-warn versus strict), `test_rules.py` (a positive and a negative
+case for each real rule, plus a check that every rule file is valid and
+carries a well-formed ATT&CK id), `test_normalise.py` (the three derived
+fields for each way CloudTrail reports them) and `test_pipeline.py`
+(ingestion, and an end-to-end regression check that the sample logs
+still raise exactly the same five alerts). The engine tests use small
+hand-written rules rather than the real ones, so an engine bug and a
+rule mistake fail in different files.
+
 ---
 
 ## Project Structure
@@ -350,11 +381,12 @@ cloudtrail-sentinel/
 +-- src/
 |   +-- ingest/          Log collection from S3 or local disk    [done]
 |   +-- normalise/       CloudTrail to common schema             [done]
-|   +-- detect/          Rule loading and evaluation engine      [loader, engine done]
+|   +-- detect/          Rule loading and evaluation engine      [done]
 |   +-- dashboard/       Streamlit interface                     [phase 3]
 |
-+-- rules/               YAML detection rules          [phase 2, 6 of 8 written]
-+-- tests/               One positive and one negative per rule  [phase 2]
++-- rules/               YAML detection rules                    [6 of 8 written]
++-- tests/               pytest suite, one file per layer        [done]
++-- .github/workflows/   CI: runs the tests on every push        [done]
 +-- sample_logs/         Sanitised CloudTrail events             [done]
 +-- simulate/            Attack simulation scripts               [phase 4]
 +-- terraform/           Sandbox infrastructure                  [phase 4]
@@ -363,6 +395,8 @@ cloudtrail-sentinel/
 |   +-- detections.md    Rule tuning notes                       [planned]
 |
 +-- requirements.txt     Python dependencies (PyYAML)
++-- requirements-dev.txt The above plus pytest
++-- pytest.ini           Test configuration
 +-- LICENSE
 +-- README.md
 ```
@@ -376,7 +410,7 @@ cloudtrail-sentinel/
 - [x] Handle gzip-compressed S3 objects
 - [x] Normalise events to common schema
 
-**Phase 2 - Detection engine** (in progress)
+**Phase 2 - Detection engine** (complete)
 - [x] Rule schema (id, description, mitre_attack, severity, condition)
 - [x] First four detection rules written as YAML (root account usage,
       console login without MFA, CloudTrail disabled/deleted, admin
@@ -385,7 +419,7 @@ cloudtrail-sentinel/
 - [x] Load full `rules/` directory (skip-and-warn, strict mode)
 - [x] Stateless rule evaluation and alerts, wired into the pipeline
 - [x] `not_in` operator, plus GuardDuty and unapproved-region rules
-- [ ] Unit tests and CI pipeline
+- [x] Unit tests (pytest) and CI pipeline (GitHub Actions)
 
 **Phase 3 - Storage and interface**
 - [ ] DuckDB persistence for events and alerts
